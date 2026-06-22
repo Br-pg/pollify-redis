@@ -672,9 +672,9 @@
   <div class="header-inner">
     <div class="logo" onclick="showPage('home')">Pollify</div>
     <div class="header-actions">
-      <button class="btn btn-ghost" onclick="showPage('browse')">Browse Polls</button>
-      <button class="btn btn-ghost" onclick="showPage('about')">About</button>
-      <button class="btn btn-primary" onclick="showPage('create')">+ Create Poll</button>
+      <button type="button" class="btn btn-ghost" onclick="showPage('browse')">Browse Polls</button>
+      <button type="button" class="btn btn-ghost" onclick="showPage('about')">About</button>
+      <button type="button" class="btn btn-primary" onclick="showPage('create')">+ Create Poll</button>
     </div>
   </div>
 </header>
@@ -696,12 +696,19 @@
       <h1>The fastest way to<br><span>create & share polls</span></h1>
       <p>Build a poll in seconds. Share the link. Watch results roll in live.</p>
       <div class="hero-cta">
-        <button class="btn btn-primary btn-large" onclick="showPage('create')">
+        <button type="button" class="btn btn-primary btn-large" onclick="showPage('create')">
           🗳️ Create a Poll — Free
         </button>
-        <button class="btn btn-ghost btn-large" onclick="showPage('browse')">
+        <button type="button" class="btn btn-ghost btn-large" onclick="showPage('browse')">
           Browse Polls →
         </button>
+      </div>
+      <div class="status-card" id="backend-status-card">
+        <div>
+          <strong>Backend status</strong>
+          <p id="backend-status-message">Checking API connectivity...</p>
+        </div>
+        <span class="status-badge" id="backend-status-badge">Loading</span>
       </div>
     </div>
 
@@ -716,7 +723,7 @@
 
     <div class="section-header" style="padding-top:0;">
       <span class="section-title">Recent Polls</span>
-      <button class="btn btn-ghost" onclick="showPage('browse')">See all →</button>
+      <button type="button" class="btn btn-ghost" onclick="showPage('browse')">See all →</button>
     </div>
     <div class="polls-grid" id="home-polls-grid"></div>
   </div>
@@ -774,7 +781,7 @@
           </div>
         </div>
 
-        <button class="btn btn-primary" style="width:100%; justify-content:center; padding:14px;" onclick="createPoll()">
+        <button type="button" class="btn btn-primary" style="width:100%; justify-content:center; padding:14px;" onclick="createPoll()">
           🚀 Publish Poll
         </button>
       </div>
@@ -786,7 +793,7 @@
   <div class="container">
     <div class="section-header">
       <span class="section-title">Browse Polls</span>
-      <button class="btn btn-primary" onclick="showPage('create')">+ Create Poll</button>
+      <button type="button" class="btn btn-primary" onclick="showPage('create')">+ Create Poll</button>
     </div>
     <div class="polls-grid" id="browse-polls-grid"></div>
   </div>
@@ -875,14 +882,12 @@
 
 <script>
 // ─────────────────────────────────────────────────────────────
-// CONFIGURATION – matches backend server.js
+// CONFIGURATION – frontend API base
+// Use a relative path so the frontend works on mobile and production.
+// For local backend testing, set the hostname or run the frontend through
+// a dev server that proxies /api to your local backend.
 // ─────────────────────────────────────────────────────────────
-const API_URL = (() => {
-  if (location.hostname === 'localhost' || location.hostname === '127.0.0.1' || !location.hostname) {
-    return 'http://localhost:3000/api';
-  }
-  return '/api';
-})();
+const API_URL = '/api';
 
 // ─────────────────────────────────────────────────────────────
 // LOCAL STORAGE FALLBACK (improves UX but backend is source of truth)
@@ -925,12 +930,38 @@ function showToast(message, isError = false) {
 // PAGE ROUTING
 // ─────────────────────────────────────────────────────────────
 function showPage(page, pollId) {
+  const hash = page === 'poll' && pollId ? `#poll/${pollId}` : `#${page}`;
+  if (location.hash !== hash) {
+    location.hash = hash;
+  }
+  navigateTo(page, pollId);
+}
+
+function handleHashChange() {
+  const hash = location.hash.replace(/^#/, '');
+  if (!hash) return navigateTo('home');
+  if (hash.startsWith('poll/')) {
+    const pollId = hash.split('/')[1];
+    return navigateTo('poll', pollId);
+  }
+  navigateTo(hash);
+}
+
+function navigateTo(page, pollId) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   const targetPage = document.getElementById('page-' + page);
-  if (targetPage) targetPage.classList.add('active');
+  if (targetPage) {
+    targetPage.classList.add('active');
+  } else {
+    navigateTo('home');
+    return;
+  }
   currentPage = page;
 
-  if (page === 'home') renderHomePolls();
+  if (page === 'home') {
+    renderHomePolls();
+    updateBackendStatus();
+  }
   if (page === 'browse') renderBrowsePolls();
   if (page === 'poll' && pollId) {
     currentPollId = pollId;
@@ -940,6 +971,8 @@ function showPage(page, pollId) {
 
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
+
+window.addEventListener('hashchange', handleHashChange);
 
 // ─────────────────────────────────────────────────────────────
 // UTILITIES
@@ -1000,7 +1033,33 @@ async function renderHomePolls() {
     renderPollCards('home-polls-grid', pollsArray.slice(0, 6));
   } catch (error) {
     console.error('Error fetching home polls:', error);
-    container.innerHTML = `<div class="empty-state"><h3>⚠️ Cannot reach backend</h3><p>Make sure the API server is running on port 3000.</p></div>`;
+    container.innerHTML = `<div class="empty-state"><h3>⚠️ Cannot reach backend</h3><p>Make sure the API server is running and reachable from this host.</p></div>`;
+  }
+}
+
+async function updateBackendStatus() {
+  const statusCard = document.getElementById('backend-status-card');
+  const message = document.getElementById('backend-status-message');
+  const badge = document.getElementById('backend-status-badge');
+  if (!message || !badge) return;
+
+  try {
+    const response = await fetch(`${API_URL}/health`, { cache: 'no-store' });
+    const data = await response.json();
+    if (response.ok && data.status === 'ok') {
+      badge.textContent = 'Online';
+      badge.classList.remove('offline');
+      message.textContent = `API is reachable. ${data.polls} poll${data.polls === 1 ? '' : 's'} available.`;
+    } else {
+      badge.textContent = 'Unavailable';
+      badge.classList.add('offline');
+      message.textContent = `API responded with an error.`;
+    }
+  } catch (error) {
+    badge.textContent = 'Offline';
+    badge.classList.add('offline');
+    message.textContent = 'Cannot reach the backend API from this page.';
+    console.error('Backend status error:', error);
   }
 }
 
@@ -1098,7 +1157,7 @@ async function renderPollView(pollId) {
     }
 
     container.innerHTML = `
-      <button class="btn btn-ghost" onclick="showPage('browse')" style="margin-bottom:20px;">← Back to Grid</button>
+      <button type="button" class="btn btn-ghost" onclick="showPage('browse')" style="margin-bottom:20px;">← Back to Grid</button>
       <div class="poll-header">
         <h2 class="poll-question">${escHtml(poll.question)}</h2>
         ${poll.description ? `<div class="poll-description">${escHtml(poll.description)}</div>` : ''}
@@ -1227,8 +1286,8 @@ async function createPoll() {
 // INITIAL LOAD
 // ─────────────────────────────────────────────────────────────
 (function init() {
-  renderHomePolls();
-  // Attach nav handlers (if any buttons with class .nav-link exist – for consistency)
+  handleHashChange();
+
   document.querySelectorAll('.nav-link').forEach(btn => {
     btn.addEventListener('click', () => showPage(btn.dataset.page));
   });
