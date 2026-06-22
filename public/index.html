@@ -202,6 +202,69 @@
   .page { display: none; }
   .page.active { display: block; }
 
+  .info-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 34px;
+    max-width: 840px;
+    margin: 0 auto 40px;
+    box-shadow: var(--glow);
+  }
+
+  .info-card h2 {
+    font-family: var(--font-head);
+    font-size: clamp(1.8rem, 4vw, 2.4rem);
+    margin-bottom: 18px;
+  }
+
+  .info-card h3 {
+    font-family: var(--font-head);
+    font-size: 1.1rem;
+    margin-top: 26px;
+    margin-bottom: 10px;
+  }
+
+  .info-card p,
+  .info-card li {
+    color: var(--muted);
+    line-height: 1.8;
+    font-size: 1rem;
+  }
+
+  .info-card ul {
+    margin: 16px 0;
+    padding-left: 20px;
+  }
+
+  .info-card a {
+    color: var(--accent);
+    text-decoration: none;
+  }
+
+  .info-card a:hover {
+    text-decoration: underline;
+  }
+
+  .footer-links {
+    display: flex;
+    justify-content: center;
+    gap: 18px;
+    flex-wrap: wrap;
+    margin-bottom: 18px;
+  }
+
+  .footer-link {
+    color: var(--muted);
+    text-decoration: none;
+    font-size: 0.95rem;
+    transition: color 0.2s;
+  }
+
+  .footer-link:hover {
+    color: var(--text);
+  }
+
   .form-card {
     background: var(--surface);
     border: 1px solid var(--border);
@@ -610,6 +673,7 @@
     <div class="logo" onclick="showPage('home')">Pollify</div>
     <div class="header-actions">
       <button class="btn btn-ghost" onclick="showPage('browse')">Browse Polls</button>
+      <button class="btn btn-ghost" onclick="showPage('about')">About</button>
       <button class="btn btn-primary" onclick="showPage('create')">+ Create Poll</button>
     </div>
   </div>
@@ -743,6 +807,51 @@
   </div>
 </div>
 
+<div id="page-about" class="page">
+  <div class="container">
+    <div class="info-card">
+      <h2>About Pollify</h2>
+      <p>Pollify is a lightweight polling platform built to help communities, teams, and event organizers create fast, shareable polls. No login is required, and you can set up polls in seconds with smart vote controls and optional results privacy.</p>
+      <h3>Why Pollify?</h3>
+      <p>We designed Pollify for speed and simplicity: publish a poll, share the link, and collect votes in real time. It works great for informal feedback, group decisions, classroom polls, and event planning.</p>
+      <h3>What you can do</h3>
+      <ul>
+        <li>Create unlimited polls with multiple choice options.</li>
+        <li>Prevent duplicate votes using IP or browser session checks.</li>
+        <li>Choose whether results show immediately or only after voting.</li>
+      </ul>
+      <p>Pollify is built on Node.js, Express, and Redis for fast performance, and supports easy deployment wherever your app needs to run.</p>
+    </div>
+  </div>
+</div>
+
+<div id="page-privacy" class="page">
+  <div class="container">
+    <div class="info-card">
+      <h2>Privacy Policy</h2>
+      <p>At Pollify, your privacy matters. This policy explains what data we collect and how it is used.</p>
+      <h3>Data we collect</h3>
+      <ul>
+        <li>Poll questions, descriptions, and option text when you create a poll.</li>
+        <li>Vote counts and poll choice selections to display results.</li>
+        <li>Optional IP or browser session metadata used only for duplicate vote prevention.</li>
+        <li>Local browser storage to remember if you voted on a poll and improve UX.</li>
+      </ul>
+      <h3>How your data is used</h3>
+      <ul>
+        <li>To store and serve polls created by users.</li>
+        <li>To enforce vote limits when duplicate prevention is selected.</li>
+        <li>To improve platform reliability and detect abuse.</li>
+      </ul>
+      <h3>Third-party services</h3>
+      <p>Pollify may use third-party hosting and analytics services. Ads shown on the site are served through Google AdSense and do not require additional personal information from you.</p>
+      <h3>Your choices</h3>
+      <p>You can create and use Pollify without registering. Optional data is only collected when needed to support vote validation and application functionality.</p>
+      <p>If you have questions about privacy, please contact the site owner.</p>
+    </div>
+  </div>
+</div>
+
 <div class="ad-footer">
   <div class="ad-label">Advertisement</div>
   <ins class="adsbygoogle adsense-footer"
@@ -754,6 +863,10 @@
 </div>
 
 <footer>
+  <div class="footer-links">
+    <a class="footer-link" href="#" onclick="showPage('about'); return false;">About</a>
+    <a class="footer-link" href="#" onclick="showPage('privacy'); return false;">Privacy Policy</a>
+  </div>
   <strong style="font-family: var(--font-head);">Pollify</strong> — Free online polling platform<br>
   <span style="margin-top:8px; display:block;">Built for communities, schools & events.</span>
 </footer>
