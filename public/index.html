@@ -53,6 +53,11 @@
     opacity: 0.4;
   }
 
+  header, .navbar {
+    position: relative;
+    z-index: 9999;
+  }
+
   header {
     position: sticky;
     top: 0;
@@ -121,6 +126,12 @@
     border-bottom: 1px solid var(--border);
     padding: 10px 24px;
     text-align: center;
+  }
+
+  .ad-container-top,
+  ins.adsbygoogle {
+    margin-top: 24px !important;
+    display: block;
   }
 
   .ad-label {
