@@ -941,6 +941,19 @@ function showToast(message, isError = false) {
   }, 3500);
 }
 
+function copyPollLink(pollId) {
+  const url = `${window.location.origin}/#poll/${pollId}`;
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(url).then(() => {
+      showToast('📋 Link copied to clipboard!');
+    }).catch(() => {
+      prompt('Copy this link:', url);
+    });
+  } else {
+    prompt('Copy this link:', url);
+  }
+}
+
 // ─────────────────────────────────────────────────────────────
 // PAGE ROUTING
 // ─────────────────────────────────────────────────────────────
@@ -1172,7 +1185,10 @@ async function renderPollView(pollId) {
     }
 
     container.innerHTML = `
-      <button type="button" class="btn btn-ghost" onclick="showPage('browse')" style="margin-bottom:20px;">← Back to Grid</button>
+      <div style="display:flex; gap:12px; margin-bottom:20px; flex-wrap:wrap;">
+        <button type="button" class="btn btn-ghost" onclick="showPage('browse')">← Back to Grid</button>
+        <button type="button" class="btn btn-ghost" onclick="copyPollLink('${pollId}')">📋 Copy Link</button>
+      </div>
       <div class="poll-header">
         <h2 class="poll-question">${escHtml(poll.question)}</h2>
         ${poll.description ? `<div class="poll-description">${escHtml(poll.description)}</div>` : ''}
@@ -1280,7 +1296,8 @@ async function createPoll() {
       return;
     }
 
-    showToast('Poll created successfully!');
+    const pollUrl = `${window.location.origin}/#poll/${result.id}`;
+    showToast(`✅ Poll created! 🔗 ${pollUrl}`);
     // Reset form
     document.getElementById('poll-question').value = '';
     document.getElementById('poll-description').value = '';
