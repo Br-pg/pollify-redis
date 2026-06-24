@@ -221,6 +221,8 @@ app.post('/api/polls', async (req, res) => {
     await savePoll(poll);
     await redis.zadd(KEYS.pollList(), { score: poll.created, member: poll.id });
 
+    const pollUrl = `${window.location.origin}/#poll/${poll.id}`;
+    showToast(`✅ Poll created! 🔗 ${pollUrl}`);
     console.log(`✅ Poll created: "${poll.question}" [${poll.id}]`);
     res.status(201).json({ id: poll.id, message: 'Poll created' });
   } catch (err) {
@@ -305,3 +307,65 @@ app.listen(PORT, async () => {
   `);
   await seedDemos();
 });
+// Redirect old hash‑based links to clean URLs
+if (window.location.hash.startsWith('#poll/')) {
+  const pollId = window.location.hash.split('/')[1];
+  window.location.replace(`/poll/${pollId}`);
+} else if (window.location.hash) {
+  const page = window.location.hash.slice(1);
+  window.location.replace(`/${page}`);
+}
+
+// ─────────────────────────────────────────────────────────────
+// PAGE ROUTING (path‑based + hash fallback)
+// ─────────────────────────────────────────────────────────────
+
+function showPage(page, pollId) {
+  const newPath = page === 'poll' && pollId ? `/poll/${pollId}` : `/${page}`;
+  // Use history.pushState to update the URL without reload
+  history.pushState({ page, pollId }, '', newPath);
+  navigateTo(page, pollId);
+}
+
+function handleRoute() {
+  const path = window.location.pathname.replace(/\/$/, '') || '/';
+  let page = 'home';
+  let pollId = null;
+
+  if (path.startsWith('/poll/')) {
+    pollId = path.split('/poll/')[1];
+    if (pollId) page = 'poll';
+    else page = 'home';
+  } else if (path === '/create') {
+    page = 'create';
+  } else if (path === '/browse') {
+    page = 'browse';
+  } else if (path === '/about') {
+    page = 'about';
+  } else if (path === '/privacy') {
+    page = 'privacy';
+  }
+  // For home or unknown routes, page stays 'home'
+
+  navigateTo(page, pollId);
+}
+
+// Listen for browser back/forward
+window.addEventListener('popstate', handleRoute);
+
+// Initial load
+handleRoute();
+
+function copyPollLink(pollId) {
+  const url = `${window.location.origin}/#poll/${pollId}`;
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(url).then(() => {
+      showToast('📋 Link copied to clipboard!');
+    }).catch(() => {
+      // fallback for older browsers or non‑HTTPS
+      prompt('Copy this link:', url);
+    });
+  } else {
+    prompt('Copy this link:', url);
+  }
+}
