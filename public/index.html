@@ -991,6 +991,15 @@ function handleRoute() {
 // Listen for browser back/forward
 window.addEventListener('popstate', handleRoute);
 
+// Redirect old hash-based links to clean URLs
+if (window.location.hash.startsWith('#poll/')) {
+  const pollId = window.location.hash.split('/')[1];
+  window.location.replace(`/poll/${pollId}`);
+} else if (window.location.hash) {
+  const page = window.location.hash.slice(1);
+  window.location.replace(`/${page}`);
+}
+
 // Initial load
 handleRoute();
 
@@ -1288,7 +1297,7 @@ async function createPoll() {
       return;
     }
 
-    const pollUrl = `${window.location.origin}/#poll/${result.id}`;
+    const pollUrl = `${window.location.origin}/poll/${result.id}`;
     showToast(`✅ Poll created! 🔗 ${pollUrl}`);
     // Reset form
     document.getElementById('poll-question').value = '';
@@ -1310,8 +1319,6 @@ async function createPoll() {
 // INITIAL LOAD
 // ─────────────────────────────────────────────────────────────
 (function init() {
-  handleHashChange();
-
   document.querySelectorAll('.nav-link').forEach(btn => {
     btn.addEventListener('click', () => showPage(btn.dataset.page));
   });
