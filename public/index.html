@@ -1083,6 +1083,101 @@
 const API_URL = '/api';
 
 // ─────────────────────────────────────────────────────────────
+// WEBSOCKET CONFIGURATION
+// ─────────────────────────────────────────────────────────────
+const WS_URL = (window.location.protocol === 'https:' ? 'wss:' : 'ws:') + 
+               '//' + window.location.host;
+
+// ─────────────────────────────────────────────────────────────
+// WEBSOCKET MANAGER FOR REAL-TIME POLL UPDATES
+// ─────────────────────────────────────────────────────────────
+class PollWebSocketManager {
+  constructor() {
+    this.ws = null;
+    this.subscribedPoll = null;
+    this.messageHandlers = {};
+  }
+
+  connect() {
+    try {
+      this.ws = new WebSocket(WS_URL);
+      
+      this.ws.onopen = () => {
+        console.log('✅ WebSocket connected');
+      };
+      
+      this.ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type === 'poll-data' || data.type === 'poll-update') {
+            this.onPollUpdate(data.poll);
+          } else if (data.type === 'error') {
+            console.error('WebSocket error:', data.message);
+          }
+        } catch (err) {
+          console.error('Parse error:', err);
+        }
+      };
+      
+      this.ws.onerror = (error) => {
+        console.error('WebSocket error:', error);
+      };
+      
+      this.ws.onclose = () => {
+        console.log('WebSocket disconnected');
+      };
+    } catch (err) {
+      console.error('WebSocket connection error:', err);
+    }
+  }
+
+  subscribe(pollId) {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      this.connect();
+      // Retry subscription after connection opens
+      setTimeout(() => this.subscribe(pollId), 500);
+      return;
+    }
+    
+    this.subscribedPoll = pollId;
+    this.ws.send(JSON.stringify({
+      type: 'subscribe',
+      pollId: pollId
+    }));
+  }
+
+  vote(optionIndex) {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      console.error('WebSocket not connected, falling back to REST');
+      return false;
+    }
+    
+    this.ws.send(JSON.stringify({
+      type: 'vote',
+      pollId: this.subscribedPoll,
+      optionIndex: optionIndex
+    }));
+    return true;
+  }
+
+  onPollUpdate(poll) {
+    // Update the current poll view with live data
+    if (currentPollId === poll.id) {
+      renderLivePollView(poll);
+    }
+  }
+
+  disconnect() {
+    if (this.ws) {
+      this.ws.close();
+      this.ws = null;
+    }
+  }
+}
+
+const pollWS = new PollWebSocketManager();
+
+// ─────────────────────────────────────────────────────────────
 // LOCAL STORAGE FALLBACK (improves UX but backend is source of truth)
 // ─────────────────────────────────────────────────────────────
 const DB = {
@@ -1514,9 +1609,68 @@ async function renderPollView(pollId) {
       // non-fatal — inline handlers should still work
       console.warn('Could not attach vote listeners:', e);
     }
+
+    // Connect to WebSocket and subscribe to poll updates for real-time results
+    if (!pollWS.ws || pollWS.ws.readyState === WebSocket.CLOSED) {
+      pollWS.connect();
+    }
+    pollWS.subscribe(pollId);
+
   } catch (error) {
     console.error('Error loading poll view:', error);
     container.innerHTML = `<div class="empty-state"><h3>Failed to load poll</h3><p>It may have been deleted.</p><button class="btn btn-ghost" onclick="showPage('browse')">← Browse polls</button></div>`;
+  }
+}
+
+// Update poll results in real-time from WebSocket updates
+function renderLivePollView(poll) {
+  const container = document.getElementById('poll-view-content');
+  if (!container) return;
+
+  const optionsList = poll.options || [];
+  let totalVotes = poll.totalVotes || 0;
+  if (!totalVotes && optionsList.length) {
+    totalVotes = optionsList.reduce((sum, opt) => sum + (opt.votes || 0), 0);
+  }
+
+  const resultsVis = poll.resultsVis || 'after_vote';
+  const userHasVoted = poll.voted === true || DB.hasVoted(poll.id);
+  const showResults = (resultsVis === 'always') || userHasVoted;
+
+  let optionsHtml = '';
+
+  if (!showResults) {
+    optionsHtml = `
+      <div class="vote-options" id="vote-options">
+        ${optionsList.map((o, i) => {
+          const txt = o.text || o;
+          return `<div class="vote-option" id="opt-${i}" onclick="selectOption(${i})"><div class="radio"></div><div class="vote-option-text">${escHtml(txt)}</div></div>`;
+        }).join('')}
+      </div>
+      <button class="btn btn-primary btn-large" style="width:100%; justify-content:center; padding:14px;" onclick="submitVote('${poll.id}')">
+        Cast Vote →
+      </button>`;
+  } else {
+    optionsHtml = `<div style="display:flex; flex-direction:column; gap:12px; margin: 20px 0;">
+      ${optionsList.map(o => {
+        const txt = o.text || o;
+        const votes = o.votes || 0;
+        const pct = totalVotes ? Math.round((votes / totalVotes) * 100) : 0;
+        return `<div class="result-option"><div class="result-bar" style="width:${pct}%; background:rgba(108,99,255,0.35);"></div><div class="result-row"><div class="result-label">${escHtml(txt)}</div><div class="result-stats"><span class="result-pct">${pct}%</span><span class="result-count">(${votes} votes)</span></div></div></div>`;
+      }).join('')}
+    </div><div class="total-votes">Total: <strong>${totalVotes}</strong> votes cast</div>`;
+  }
+
+  // Update results section only (preserve header and buttons)
+  const resultsSection = container.querySelector('div[style*="display:flex; flex-direction:column; gap:12px; margin: 20px 0"]') ||
+                        container.querySelector('.result-option')?.parentElement;
+  const totalVotesDiv = container.querySelector('.total-votes');
+  
+  if (resultsSection) {
+    resultsSection.outerHTML = optionsHtml.split('<div class="total-votes">')[0];
+    if (totalVotesDiv) {
+      totalVotesDiv.outerHTML = optionsHtml.split('<div class="total-votes">')[1];
+    }
   }
 }
 
@@ -1534,6 +1688,17 @@ async function submitVote(pollId) {
     return;
   }
   try {
+    // Try WebSocket first for real-time feedback
+    const wsSuccess = pollWS.vote(selectedOptionIdx);
+    if (wsSuccess) {
+      // WebSocket message sent successfully - wait a moment for update
+      DB.markVoted(pollId, selectedOptionIdx);
+      showToast('Vote recorded! 🎉');
+      selectedOptionIdx = null;
+      return;
+    }
+
+    // Fallback to REST API if WebSocket is not available
     const response = await fetch(`${API_URL}/polls/${pollId}/vote`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

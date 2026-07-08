@@ -19,9 +19,16 @@ const { v4: uuidv4 } = require('uuid');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const { Redis } = require('@upstash/redis');
+const http = require('http');
+const WebSocket = require('ws');
 
 const app = express();
+const server = http.createServer(app);
+const wss = new WebSocket.Server({ server });
 const PORT = process.env.PORT || 3000;
+
+// Store connected WebSocket clients by poll ID
+const pollConnections = {};
 
 // ─── REDIS CLIENT with FALLBACK ───
 let redis = null;
@@ -364,18 +371,144 @@ app.get('/api/health', async (req, res) => {
   }
 });
 
+// ─── WEBSOCKET REAL-TIME UPDATES ───
+wss.on('connection', (ws) => {
+  console.log('🔌 WebSocket client connected');
+  let subscribedPoll = null;
+
+  ws.on('message', async (message) => {
+    try {
+      const data = JSON.parse(message);
+
+      // Subscribe to poll updates
+      if (data.type === 'subscribe') {
+        subscribedPoll = data.pollId;
+        if (!pollConnections[subscribedPoll]) {
+          pollConnections[subscribedPoll] = [];
+        }
+        pollConnections[subscribedPoll].push(ws);
+
+        // Send current poll data to subscriber
+        const poll = await getPoll(subscribedPoll);
+        if (poll) {
+          ws.send(JSON.stringify({
+            type: 'poll-data',
+            poll: {
+              id: poll.id,
+              question: poll.question,
+              description: poll.description,
+              options: poll.options,
+              totalVotes: poll.options.reduce((s, o) => s + o.votes, 0)
+            }
+          }));
+        }
+        console.log(`✅ Client subscribed to poll: ${subscribedPoll}`);
+      }
+
+      // Handle vote submission via WebSocket
+      if (data.type === 'vote' && subscribedPoll) {
+        const poll = await getPoll(subscribedPoll);
+        if (!poll) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Poll not found' }));
+          return;
+        }
+
+        const optionIndex = data.optionIndex;
+        if (typeof optionIndex !== 'number' || optionIndex < 0 || optionIndex >= poll.options.length) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Invalid option' }));
+          return;
+        }
+
+        // Check duplicate vote
+        if (poll.dupCheck === 'ip') {
+          const voteKey = KEYS.vote(subscribedPoll, getIP({ socket: { remoteAddress: ws._socket?.remoteAddress } }));
+          const alreadyVoted = await storage.get(voteKey);
+          if (alreadyVoted) {
+            ws.send(JSON.stringify({ type: 'error', message: 'You already voted' }));
+            return;
+          }
+          await storage.set(voteKey, '1', { ex: 60 * 60 * 24 * 30 });
+        }
+
+        // Update vote
+        poll.options[optionIndex].votes += 1;
+        await savePoll(poll);
+
+        // Broadcast to all connected clients on this poll
+        broadcastPollUpdate(subscribedPoll);
+        console.log(`🗳️  Vote recorded via WebSocket for ${subscribedPoll}`);
+      }
+
+    } catch (err) {
+      console.error('WebSocket message error:', err);
+      ws.send(JSON.stringify({ type: 'error', message: 'Server error' }));
+    }
+  });
+
+  ws.on('close', () => {
+    // Remove client from subscribed poll
+    if (subscribedPoll && pollConnections[subscribedPoll]) {
+      pollConnections[subscribedPoll] = pollConnections[subscribedPoll].filter(c => c !== ws);
+      if (pollConnections[subscribedPoll].length === 0) {
+        delete pollConnections[subscribedPoll];
+      }
+    }
+    console.log('🔌 WebSocket client disconnected');
+  });
+
+  ws.on('error', (error) => {
+    console.error('WebSocket error:', error);
+  });
+});
+
+// Broadcast poll update to all connected clients
+function broadcastPollUpdate(pollId) {
+  if (!pollConnections[pollId]) return;
+
+  storage.get(KEYS.poll(pollId)).then(raw => {
+    let poll;
+    if (typeof raw === 'string') {
+      poll = JSON.parse(raw);
+    } else {
+      poll = raw;
+    }
+
+    if (!poll) return;
+
+    const message = JSON.stringify({
+      type: 'poll-update',
+      poll: {
+        id: poll.id,
+        question: poll.question,
+        description: poll.description,
+        options: poll.options,
+        totalVotes: poll.options.reduce((s, o) => s + o.votes, 0)
+      }
+    });
+
+    pollConnections[pollId].forEach(client => {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(message);
+      }
+    });
+  }).catch(err => {
+    console.error('Broadcast error:', err);
+  });
+}
+
 // ─── START ───
 // Single Page App fallback - serve index.html for any non-API route
 app.get(/^(?!\/api\/).*/, (req, res) => {
   res.sendFile('index.html', { root: 'public' });
 });
 
-app.listen(PORT, async () => {
+server.listen(PORT, async () => {
   const storageType = useInMemory ? 'In-Memory' : 'Upstash Redis';
   console.log(`
   🚀 Pollify backend running on port ${PORT}
   📊 API: http://localhost:${PORT}/api/polls
   🏥 Health: http://localhost:${PORT}/api/health
+  🔌 WebSocket: ws://localhost:${PORT} (for real-time updates)
   💾 Storage: ${storageType}
   `);
   await seedDemos();
