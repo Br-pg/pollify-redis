@@ -23,11 +23,79 @@ const { Redis } = require('@upstash/redis');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// ─── REDIS CLIENT ───
-const redis = new Redis({
-  url: process.env.UPSTASH_REDIS_REST_URL,
-  token: process.env.UPSTASH_REDIS_REST_TOKEN,
-});
+// ─── REDIS CLIENT with FALLBACK ───
+let redis = null;
+let useInMemory = false;
+
+// Try to initialize Redis, fall back to in-memory if credentials missing
+if (process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN) {
+  try {
+    redis = new Redis({
+      url: process.env.UPSTASH_REDIS_REST_URL,
+      token: process.env.UPSTASH_REDIS_REST_TOKEN,
+    });
+    console.log('✅ Using Upstash Redis storage');
+  } catch (err) {
+    console.log('⚠️  Redis initialization failed, using in-memory storage');
+    useInMemory = true;
+  }
+} else {
+  console.log('ℹ️  No Redis credentials found. Using in-memory storage.');
+  console.log('   To use persistent storage, set env vars: UPSTASH_REDIS_REST_URL, UPSTASH_REDIS_REST_TOKEN');
+  useInMemory = true;
+}
+
+// ─── IN-MEMORY STORAGE (Fallback) ───
+const memStore = {
+  data: {},        // { key: value }
+  sorted: {},      // { setKey: [[score, member], ...] }
+  expires: {},     // { key: expireTime }
+};
+
+// In-memory storage methods
+const memoryStorage = {
+  get: async (key) => {
+    if (memStore.expires[key] && memStore.expires[key] < Date.now()) {
+      delete memStore.data[key];
+      delete memStore.expires[key];
+      return null;
+    }
+    return memStore.data[key] || null;
+  },
+  set: async (key, value, opts) => {
+    memStore.data[key] = value;
+    if (opts && opts.ex) {
+      memStore.expires[key] = Date.now() + opts.ex * 1000;
+    }
+  },
+  del: async (key) => {
+    delete memStore.data[key];
+    delete memStore.expires[key];
+  },
+  zadd: async (key, item) => {
+    if (!memStore.sorted[key]) memStore.sorted[key] = [];
+    memStore.sorted[key] = memStore.sorted[key].filter(([_, m]) => m !== item.member);
+    memStore.sorted[key].push([item.score, item.member]);
+    memStore.sorted[key].sort((a, b) => a[0] - b[0]);
+  },
+  zrange: async (key, start, stop, opts) => {
+    if (!memStore.sorted[key]) return [];
+    let items = memStore.sorted[key].map(([_, m]) => m);
+    if (opts && opts.rev) items = items.reverse();
+    if (stop === -1) return items.slice(start);
+    return items.slice(start, stop + 1);
+  },
+  zrem: async (key, member) => {
+    if (!memStore.sorted[key]) return;
+    memStore.sorted[key] = memStore.sorted[key].filter(([_, m]) => m !== member);
+  },
+  zcard: async (key) => {
+    return (memStore.sorted[key] || []).length;
+  }
+};
+
+// Storage adapter (uses Redis or memory)
+const storage = useInMemory ? memoryStorage : redis;
 
 // ─── REDIS KEY HELPERS ───
 const KEYS = {
@@ -70,7 +138,7 @@ app.use('/api/polls/:id/vote', voteLimiter);
 // ─── SEED DEMO DATA (runs once if list is empty) ───
 async function seedDemos() {
   try {
-    const count = await redis.zcard(KEYS.pollList());
+    const count = await storage.zcard(KEYS.pollList());
     if (count > 0) return; // already seeded
 
     const demos = [
@@ -104,13 +172,13 @@ async function seedDemos() {
     ];
 
     for (const demo of demos) {
-      await redis.set(KEYS.poll(demo.id), JSON.stringify(demo));
-      await redis.zadd(KEYS.pollList(), { score: demo.created, member: demo.id });
+      await storage.set(KEYS.poll(demo.id), JSON.stringify(demo));
+      await storage.zadd(KEYS.pollList(), { score: demo.created, member: demo.id });
     }
 
-    console.log('✅ Demo polls seeded to Redis');
+    console.log('✅ Demo polls seeded');
   } catch (err) {
-    console.error('⚠️  Redis seed error (check env vars):', err.message);
+    console.error('⚠️  Seed error:', err.message);
   }
 }
 
@@ -136,13 +204,13 @@ function validatePoll(body) {
 }
 
 async function getPoll(id) {
-  const raw = await redis.get(KEYS.poll(id));
+  const raw = await storage.get(KEYS.poll(id));
   if (!raw) return null;
   return typeof raw === 'string' ? JSON.parse(raw) : raw;
 }
 
 async function savePoll(poll) {
-  await redis.set(KEYS.poll(poll.id), JSON.stringify(poll));
+  await storage.set(KEYS.poll(poll.id), JSON.stringify(poll));
 }
 
 // ════════════════════════════════════════════════
@@ -153,7 +221,7 @@ async function savePoll(poll) {
 app.get('/api/polls', async (req, res) => {
   try {
     // Fetch IDs from sorted set, newest first
-    const ids = await redis.zrange(KEYS.pollList(), 0, -1, { rev: true });
+    const ids = await storage.zrange(KEYS.pollList(), 0, -1, { rev: true });
 
     const polls = await Promise.all(ids.map(id => getPoll(id)));
     const list = polls
@@ -181,7 +249,7 @@ app.get('/api/polls/:id', async (req, res) => {
     if (!poll) return res.status(404).json({ error: 'Poll not found' });
 
     const ip = getIP(req);
-    const voted = !!(await redis.get(KEYS.vote(poll.id, ip)));
+    const voted = !!(await storage.get(KEYS.vote(poll.id, ip)));
 
     res.json({
       id: poll.id,
@@ -219,7 +287,7 @@ app.post('/api/polls', async (req, res) => {
     };
 
     await savePoll(poll);
-    await redis.zadd(KEYS.pollList(), { score: poll.created, member: poll.id });
+    await storage.zadd(KEYS.pollList(), { score: poll.created, member: poll.id });
 
     console.log(`✅ Poll created: "${poll.question}" [${poll.id}]`);
     res.status(201).json({ id: poll.id, message: 'Poll created' });
@@ -245,12 +313,12 @@ app.post('/api/polls/:id/vote', async (req, res) => {
     // Duplicate check (IP-based)
     if (poll.dupCheck === 'ip') {
       const voteKey = KEYS.vote(poll.id, ip);
-      const alreadyVoted = await redis.get(voteKey);
+      const alreadyVoted = await storage.get(voteKey);
       if (alreadyVoted) {
         return res.status(409).json({ error: 'You already voted on this poll.' });
       }
       // Store vote record (30-day TTL)
-      await redis.set(voteKey, '1', { ex: 60 * 60 * 24 * 30 });
+      await storage.set(voteKey, '1', { ex: 60 * 60 * 24 * 30 });
     }
 
     poll.options[optionIndex].votes += 1;
@@ -272,11 +340,11 @@ app.post('/api/polls/:id/vote', async (req, res) => {
 // DELETE /api/polls/:id — delete poll
 app.delete('/api/polls/:id', async (req, res) => {
   try {
-    const exists = await redis.get(KEYS.poll(req.params.id));
+    const exists = await storage.get(KEYS.poll(req.params.id));
     if (!exists) return res.status(404).json({ error: 'Not found' });
 
-    await redis.del(KEYS.poll(req.params.id));
-    await redis.zrem(KEYS.pollList(), req.params.id);
+    await storage.del(KEYS.poll(req.params.id));
+    await storage.zrem(KEYS.pollList(), req.params.id);
 
     res.json({ message: 'Deleted' });
   } catch (err) {
@@ -288,10 +356,11 @@ app.delete('/api/polls/:id', async (req, res) => {
 // Health check
 app.get('/api/health', async (req, res) => {
   try {
-    const count = await redis.zcard(KEYS.pollList());
-    res.json({ status: 'ok', polls: count, storage: 'redis' });
-  } catch {
-    res.json({ status: 'ok', polls: '?', storage: 'redis-error' });
+    const count = await storage.zcard(KEYS.pollList());
+    const storageType = useInMemory ? 'memory' : 'redis';
+    res.json({ status: 'ok', polls: count, storage: storageType });
+  } catch (err) {
+    res.json({ status: 'ok', polls: '?', storage: 'error' });
   }
 });
 
@@ -302,11 +371,12 @@ app.get(/^(?!\/api\/).*/, (req, res) => {
 });
 
 app.listen(PORT, async () => {
+  const storageType = useInMemory ? 'In-Memory' : 'Upstash Redis';
   console.log(`
   🚀 Pollify backend running on port ${PORT}
   📊 API: http://localhost:${PORT}/api/polls
   🏥 Health: http://localhost:${PORT}/api/health
-  💾 Storage: Upstash Redis
+  💾 Storage: ${storageType}
   `);
   await seedDemos();
 });

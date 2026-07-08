@@ -680,6 +680,165 @@
     font-weight: 700;
     letter-spacing: -0.5px;
   }
+
+  /* ─── SHARE MODAL STYLES ─── */
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 9998;
+    backdrop-filter: blur(4px);
+  }
+
+  .modal-overlay.show {
+    display: flex;
+    animation: fadeIn 0.2s ease;
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
+  .modal-content {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 40px 32px;
+    max-width: 500px;
+    width: 90%;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+    animation: slideUp 0.3s ease;
+  }
+
+  @keyframes slideUp {
+    from { transform: translateY(20px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+  }
+
+  .modal-icon {
+    font-size: 3rem;
+    margin-bottom: 16px;
+  }
+
+  .modal-title {
+    font-family: var(--font-head);
+    font-size: 1.6rem;
+    font-weight: 700;
+    margin-bottom: 12px;
+    color: var(--text);
+  }
+
+  .modal-subtitle {
+    color: var(--muted);
+    margin-bottom: 28px;
+    font-size: 0.95rem;
+    line-height: 1.5;
+  }
+
+  .share-link-container {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 20px;
+  }
+
+  .share-link-input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: var(--text);
+    font-size: 0.9rem;
+    outline: none;
+    font-family: 'Courier New', monospace;
+    word-break: break-all;
+    padding: 0;
+  }
+
+  .share-link-input::selection {
+    background: rgba(108, 99, 255, 0.3);
+  }
+
+  .copy-btn-modal {
+    flex-shrink: 0;
+    padding: 8px 14px;
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 500;
+    font-size: 0.85rem;
+    transition: all 0.2s;
+    white-space: nowrap;
+  }
+
+  .copy-btn-modal:hover {
+    background: #7b73ff;
+    transform: translateY(-1px);
+  }
+
+  .copy-btn-modal.copied {
+    background: var(--accent3);
+  }
+
+  .modal-actions {
+    display: flex;
+    gap: 12px;
+  }
+
+  .modal-actions .btn {
+    flex: 1;
+    justify-content: center;
+    padding: 12px 16px;
+  }
+
+  .btn-secondary {
+    background: var(--surface2);
+    color: var(--text);
+    border: 1px solid var(--border);
+  }
+
+  .btn-secondary:hover {
+    background: rgba(108, 99, 255, 0.1);
+    border-color: var(--accent);
+  }
+
+  /* ─── COPY BUTTON IN POLL HEADER ─── */
+  .copy-btn-inline {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    background: rgba(108, 99, 255, 0.1);
+    border: 1px solid rgba(108, 99, 255, 0.3);
+    color: var(--accent);
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.85rem;
+    font-weight: 500;
+    transition: all 0.2s;
+    font-family: var(--font-body);
+    text-decoration: none;
+  }
+
+  .copy-btn-inline:hover {
+    background: rgba(108, 99, 255, 0.2);
+    border-color: var(--accent);
+  }
+
+  .copy-btn-inline.copied {
+    background: rgba(67, 233, 123, 0.1);
+    border-color: rgba(67, 233, 123, 0.3);
+    color: var(--accent3);
+  }
 </style>
 </head>
 <body>
@@ -895,6 +1054,25 @@
 
 <div class="toast" id="toast">✨ Message</div>
 
+<!-- Share Modal -->
+<div class="modal-overlay" id="shareModal">
+  <div class="modal-content">
+    <div class="modal-icon">🎉</div>
+    <div class="modal-title">Poll Created!</div>
+    <div class="modal-subtitle">Your poll is live. Share this link with others to collect votes:</div>
+    
+    <div class="share-link-container">
+      <input type="text" class="share-link-input" id="shareLink" readonly>
+      <button class="copy-btn-modal" id="copyBtnModal" onclick="copyShareLink()">Copy</button>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeShareModal()">Maybe Later</button>
+      <button class="btn btn-primary" onclick="gotoSharePoll()">View Poll</button>
+    </div>
+  </div>
+</div>
+
 <script>
 // ─────────────────────────────────────────────────────────────
 // CONFIGURATION – frontend API base
@@ -953,6 +1131,120 @@ function copyPollLink(pollId) {
     prompt('Copy this link:', url);
   }
 }
+
+function copyPollLinkWithFeedback(pollId) {
+  const url = `${window.location.origin}/poll/${pollId}`;
+  const btn = document.getElementById('copyBtnPoll');
+  
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(url).then(() => {
+      if (btn) {
+        btn.textContent = '✓ Copied!';
+        btn.classList.add('copied');
+        setTimeout(() => {
+          btn.textContent = '📋 Share';
+          btn.classList.remove('copied');
+        }, 2000);
+      }
+      showToast('📋 Link copied to clipboard!');
+    }).catch(() => {
+      prompt('Copy this link:', url);
+    });
+  } else {
+    prompt('Copy this link:', url);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// SHARE MODAL FUNCTIONS
+// ─────────────────────────────────────────────────────────────
+let shareModalPollId = null;
+
+function showShareModal(pollId) {
+  shareModalPollId = pollId;
+  const url = `${window.location.origin}/poll/${pollId}`;
+  document.getElementById('shareLink').value = url;
+  document.getElementById('shareModal').classList.add('show');
+  document.getElementById('copyBtnModal').textContent = 'Copy';
+  document.getElementById('copyBtnModal').classList.remove('copied');
+}
+
+function closeShareModal() {
+  document.getElementById('shareModal').classList.remove('show');
+  shareModalPollId = null;
+}
+
+function copyShareLink() {
+  const linkInput = document.getElementById('shareLink');
+  const url = linkInput.value;
+  const btn = document.getElementById('copyBtnModal');
+  
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(url).then(() => {
+      btn.textContent = '✓ Copied!';
+      btn.classList.add('copied');
+      setTimeout(() => {
+        btn.textContent = 'Copy';
+        btn.classList.remove('copied');
+      }, 2000);
+    }).catch(() => {
+      linkInput.select();
+      document.execCommand('copy');
+      btn.textContent = '✓ Copied!';
+      btn.classList.add('copied');
+      setTimeout(() => {
+        btn.textContent = 'Copy';
+        btn.classList.remove('copied');
+      }, 2000);
+    });
+  } else {
+    linkInput.select();
+    document.execCommand('copy');
+    btn.textContent = '✓ Copied!';
+    btn.classList.add('copied');
+    setTimeout(() => {
+      btn.textContent = 'Copy';
+      btn.classList.remove('copied');
+    }, 2000);
+  }
+}
+
+function gotoSharePoll() {
+  if (shareModalPollId) {
+    closeShareModal();
+    showPage('poll', shareModalPollId);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// PAGE NAVIGATION
+// ─────────────────────────────────────────────────────────────
+function navigateTo(page, pollId) {
+  currentPage = page;
+  currentPollId = pollId;
+  selectedOptionIdx = null;
+
+  // Hide all pages
+  document.querySelectorAll('.page').forEach(el => el.classList.remove('active'));
+  
+  // Show the target page
+  const pageEl = document.getElementById(`page-${page}`);
+  if (pageEl) pageEl.classList.add('active');
+
+  // Call page-specific render functions
+  if (page === 'home') {
+    renderHomePolls();
+    updateBackendStatus();
+  } else if (page === 'browse') {
+    renderBrowsePolls();
+  } else if (page === 'poll' && pollId) {
+    renderPollView(pollId);
+  }
+
+  // Scroll to top
+  window.scrollTo(0, 0);
+}
+
 
 // ─────────────────────────────────────────────────────────────
 // PAGE ROUTING (path‑based + hash fallback)
@@ -1186,9 +1478,11 @@ async function renderPollView(pollId) {
     }
 
     container.innerHTML = `
-      <div style="display:flex; gap:12px; margin-bottom:20px; flex-wrap:wrap;">
+      <div style="display:flex; gap:12px; margin-bottom:20px; flex-wrap:wrap; align-items:center;">
         <button type="button" class="btn btn-ghost" onclick="showPage('browse')">← Back to Grid</button>
-        <button type="button" class="btn btn-ghost" onclick="copyPollLink('${pollId}')">📋 Copy Link</button>
+        <button type="button" class="copy-btn-inline" id="copyBtnPoll" onclick="copyPollLinkWithFeedback('${pollId}')" title="Copy poll link">
+          📋 Share
+        </button>
       </div>
       <div class="poll-header">
         <h2 class="poll-question">${escHtml(poll.question)}</h2>
@@ -1297,8 +1591,6 @@ async function createPoll() {
       return;
     }
 
-    const pollUrl = `${window.location.origin}/poll/${result.id}`;
-    showToast(`✅ Poll created! 🔗 ${pollUrl}`);
     // Reset form
     document.getElementById('poll-question').value = '';
     document.getElementById('poll-description').value = '';
@@ -1307,13 +1599,15 @@ async function createPoll() {
       <div class="option-row"><input type="text" placeholder="Option 1" class="option-input"><button class="btn-icon" onclick="removeOption(this)" title="Remove">✕</button></div>
       <div class="option-row"><input type="text" placeholder="Option 2" class="option-input"><button class="btn-icon" onclick="removeOption(this)" title="Remove">✕</button></div>
     `;
-    // Navigate to the newly created poll
-    showPage('poll', result.id);
+    
+    // Show the share modal with the poll link
+    showShareModal(result.id);
   } catch (err) {
     console.error('Poll creation error:', err);
     showToast('Network error – could not create poll', true);
   }
 }
+
 
 // ─────────────────────────────────────────────────────────────
 // INITIAL LOAD
